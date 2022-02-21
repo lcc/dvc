@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 
 from funcy import first
 
@@ -14,14 +15,10 @@ from dvc.utils import format_link
 logger = logging.getLogger(__name__)
 
 
-def _show_json(renderers, path: None):
-    if any(r.needs_output_path for r in renderers) and not path:
-        raise DvcException("Output path ('-o') is required!")
+def _show_json(renderers):
+    from dvc.render.convert import to_json
 
-    result = {
-        renderer.filename: json.loads(renderer.as_json(path=path))
-        for renderer in renderers
-    }
+    result = {renderer.filename: to_json(renderer) for renderer in renderers}
     if result:
         ui.write_json(result)
 
@@ -40,8 +37,9 @@ class CmdPlots(CmdBase):
     def run(self):
         from pathlib import Path
 
-        from dvc.render.utils import match_renderers, render
-        from dvc.render.vega import VegaRenderer
+        from dvc_render import render_html
+
+        from dvc.render.match import match_renderers
 
         if self.args.show_vega:
             if not self.args.targets:
@@ -72,27 +70,37 @@ class CmdPlots(CmdBase):
                 )
 
             renderers = match_renderers(
-                plots_data=plots_data, templates=self.repo.plots.templates
+                plots_data=plots_data, out=self.args.out
             )
 
             if self.args.show_vega:
-                renderer = first(
-                    filter(lambda r: isinstance(r, VegaRenderer), renderers)
-                )
+                renderer = first(filter(lambda r: r.TYPE == "vega", renderers))
                 if renderer:
-                    ui.write_json(renderer.asdict())
+                    ui.write_json(json.loads(renderer.partial_html()))
                 return 0
             if self.args.json:
-                _show_json(renderers, self.args.out)
+                _show_json(renderers)
                 return 0
 
             rel: str = self.args.out or "dvc_plots"
             path: Path = (Path.cwd() / rel).resolve()
-            index_path = render(
-                self.repo,
-                renderers,
+
+            html_template_path = self.args.html_template
+            if not html_template_path:
+                html_template_path = self.repo.config.get("plots", {}).get(
+                    "html_template", None
+                )
+                if html_template_path and not os.path.isabs(
+                    html_template_path
+                ):
+                    html_template_path = os.path.join(
+                        self.repo.dvc_dir, html_template_path
+                    )
+
+            index_path = render_html(
+                renderers=renderers,
                 path=path,
-                html_template_path=self.args.html_template,
+                template_path=html_template_path,
             )
 
             ui.write(index_path.as_uri())
@@ -153,15 +161,17 @@ class CmdPlotsTemplates(CmdBase):
     def run(self):
         import os
 
+        from dvc_render.vega_templates import dump_templates
+
         try:
             out = (
                 os.path.join(os.getcwd(), self.args.out)
                 if self.args.out
-                else self.repo.plots.templates.templates_dir
+                else self.repo.plots.templates_dir
             )
 
             targets = [self.args.target] if self.args.target else None
-            self.repo.plots.templates.init(output=out, targets=targets)
+            dump_templates(output=out, targets=targets)
             templates_path = os.path.relpath(out, os.getcwd())
             ui.write(f"Templates have been written into '{templates_path}'.")
 

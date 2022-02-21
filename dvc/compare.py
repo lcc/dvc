@@ -169,14 +169,18 @@ class TabularData(MutableSequence[Sequence["CellT"]]):
     def to_parallel_coordinates(
         self, output_path: "StrPath", color_by: str = None
     ) -> str:
-        from dvc.render.html import write
-        from dvc.render.plotly import ParallelCoordinatesRenderer
+        from dvc_render.html import render_html
+        from dvc_render.plotly import ParallelCoordinatesRenderer
 
-        index_path = write(
-            output_path,
+        index_path = render_html(
             renderers=[
-                ParallelCoordinatesRenderer(self, color_by, self._fill_value)
+                ParallelCoordinatesRenderer(
+                    self.as_dict(),
+                    color_by=color_by,
+                    fill_value=self._fill_value,
+                )
             ],
+            path=output_path,
         )
         return index_path.as_uri()
 
